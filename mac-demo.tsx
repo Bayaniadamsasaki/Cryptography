@@ -28,9 +28,8 @@ function simpleHMAC(key: string, message: string): string {
   return Math.abs(hash).toString(16).padStart(8, "0")
 }
 
-// USAC simulation (simplified)
+// USAC implementation based on one-time pad
 function generateUSAC(message: string, key: string): string {
-  // Simplified USAC implementation
   const messageLength = message.length
   const keyLength = key.length
 
@@ -38,15 +37,81 @@ function generateUSAC(message: string, key: string): string {
     throw new Error("USAC requires key length >= message length")
   }
 
-  let result = ""
+  // Convert message to bytes
+  const messageBytes = new TextEncoder().encode(message)
+  
+  // Convert key to bytes (take only the first messageLength bytes)
+  const keyBytes = new TextEncoder().encode(key.substring(0, messageLength))
+  
+  // Perform XOR operation (one-time pad)
+  const encodedBytes = new Uint8Array(messageLength)
   for (let i = 0; i < messageLength; i++) {
-    const messageChar = message.charCodeAt(i)
-    const keyChar = key.charCodeAt(i)
-    const xor = messageChar ^ keyChar
-    result += xor.toString(16).padStart(2, "0")
+    encodedBytes[i] = messageBytes[i] ^ keyBytes[i]
   }
+  
+  // Generate authentication tag using remaining key bytes
+  let authTag = 0
+  const remainingKeyBytes = new TextEncoder().encode(key.substring(messageLength, messageLength + 16))
+  
+  for (let i = 0; i < messageBytes.length; i++) {
+    if (i < remainingKeyBytes.length) {
+      authTag ^= messageBytes[i] ^ remainingKeyBytes[i]
+    } else {
+      authTag ^= messageBytes[i]
+    }
+  }
+  
+  // Return encoded message + authentication tag
+  const encodedHex = Array.from(encodedBytes).map(b => b.toString(16).padStart(2, '0')).join('')
+  const authTagHex = authTag.toString(16).padStart(2, '0')
+  
+  return `${encodedHex}|${authTagHex}`
+}
 
-  return result
+// Function to verify USAC
+function verifyUSAC(encodedMessage: string, key: string, originalLength: number): boolean {
+  try {
+    const parts = encodedMessage.split('|')
+    if (parts.length !== 2) return false
+    
+    const encodedHex = parts[0]
+    const receivedTag = parts[1]
+    
+    // Convert hex back to bytes
+    const encodedBytes = new Uint8Array(encodedHex.length / 2)
+    for (let i = 0; i < encodedHex.length; i += 2) {
+      encodedBytes[i / 2] = parseInt(encodedHex.substr(i, 2), 16)
+    }
+    
+    // Decode message using one-time pad
+    const keyBytes = new TextEncoder().encode(key.substring(0, originalLength))
+    const decodedBytes = new Uint8Array(originalLength)
+    
+    for (let i = 0; i < originalLength; i++) {
+      decodedBytes[i] = encodedBytes[i] ^ keyBytes[i]
+    }
+    
+    // Convert back to string
+    const decodedMessage = new TextDecoder().decode(decodedBytes)
+    
+    // Generate expected authentication tag
+    let expectedTag = 0
+    const remainingKeyBytes = new TextEncoder().encode(key.substring(originalLength, originalLength + 16))
+    
+    for (let i = 0; i < decodedBytes.length; i++) {
+      if (i < remainingKeyBytes.length) {
+        expectedTag ^= decodedBytes[i] ^ remainingKeyBytes[i]
+      } else {
+        expectedTag ^= decodedBytes[i]
+      }
+    }
+    
+    const expectedTagHex = expectedTag.toString(16).padStart(2, '0')
+    
+    return expectedTagHex === receivedTag
+  } catch {
+    return false
+  }
 }
 
 export default function CryptoMACDemo() {
@@ -60,6 +125,8 @@ export default function CryptoMACDemo() {
   const [usacKey, setUsacKey] = useState("")
   const [usacResult, setUsacResult] = useState("")
   const [usacError, setUsacError] = useState("")
+  const [usacVerifyResult, setUsacVerifyResult] = useState("")
+  const [usacVerifyStatus, setUsacVerifyStatus] = useState<"none" | "valid" | "invalid">("none")
   const [showKey, setShowKey] = useState(false)
 
   const generateMAC = () => {
@@ -83,6 +150,18 @@ export default function CryptoMACDemo() {
     } catch (error) {
       setUsacError(error instanceof Error ? error.message : "Unknown error")
       setUsacResult("")
+    }
+  }
+
+  const verifyUSACCode = () => {
+    try {
+      setUsacError("")
+      if (!usacKey || !usacVerifyResult) return
+      const isValid = verifyUSAC(usacVerifyResult, usacKey, usacMessage.length)
+      setUsacVerifyStatus(isValid ? "valid" : "invalid")
+    } catch (error) {
+      setUsacError(error instanceof Error ? error.message : "Unknown error")
+      setUsacVerifyStatus("invalid")
     }
   }
 
@@ -258,9 +337,45 @@ export default function CryptoMACDemo() {
                 <div className="space-y-2">
                   <Label>USAC Result:</Label>
                   <div className="p-3 bg-muted rounded-md font-mono text-sm break-all">{usacResult}</div>
-                  <p className="text-xs text-muted-foreground">Hasil enkripsi XOR antara pesan dan kunci</p>
+                  <p className="text-xs text-muted-foreground">Format: [Encoded Message]|[Authentication Tag]</p>
                 </div>
               )}
+
+              <div className="border-t pt-4">
+                <h4 className="font-semibold mb-2">Verifikasi USAC</h4>
+                <div className="space-y-2">
+                  <Label htmlFor="usac-verify">USAC untuk Verifikasi</Label>
+                  <Input
+                    id="usac-verify"
+                    placeholder="Masukkan USAC yang akan diverifikasi..."
+                    value={usacVerifyResult}
+                    onChange={(e) => setUsacVerifyResult(e.target.value)}
+                  />
+                  <Button onClick={verifyUSACCode} variant="outline" className="w-full">
+                    Verifikasi USAC
+                  </Button>
+
+                  {usacVerifyStatus !== "none" && (
+                    <div className="flex items-center gap-2">
+                      {usacVerifyStatus === "valid" ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <Badge variant="default" className="bg-green-500">
+                            Valid
+                          </Badge>
+                          <span className="text-sm text-green-600">USAC valid - Pesan autentik</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-4 w-4 text-red-500" />
+                          <Badge variant="destructive">Invalid</Badge>
+                          <span className="text-sm text-red-600">USAC tidak valid - Pesan mungkin diubah</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
