@@ -73,8 +73,10 @@ pnpm dev
 ### USAC Demo
 1. Masukkan pesan yang ingin di-USAC
 2. Masukkan kunci (harus ≥ panjang pesan)
-3. Klik "Generate USAC"
-4. Hasil USAC akan ditampilkan
+3. Klik "Generate USAC" untuk menghasilkan USAC
+4. Masukkan USAC yang ingin diverifikasi
+5. Klik "Verifikasi USAC"
+6. Status verifikasi akan ditampilkan
 
 ## 🔒 Keamanan
 
